@@ -57,62 +57,90 @@ def mask_phone(phone):
 
 def login(session, username, password):
     print(f"\n🔄 账号 {mask_phone(username)} 登录中...")
-    try:
-        # 旧版账号密码登录页（关键）
-        login_url = (
-            "https://m.cloud.189.cn/udb/udb_login.jsp"
-            "?pageId=1&pageKey=default&clientType=wap"
-            "&redirectURL=https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html"
-        )
-        r = session.get(login_url, timeout=15)
-        time.sleep(random.uniform(0.5, 1.2))
+    max_retry = 2  # 失败自动重试2次
+    for retry in range(max_retry):
+        try:
+            # 1. 先访问主页初始化会话，避免被重定向到免密页
+            session.get("https://m.cloud.189.cn/", timeout=15, allow_redirects=True)
+            time.sleep(random.uniform(1, 2))
 
-        # 抓 paramId、j_rsaKey（旧版页面才有）
-        paramId = re.search(r'name="paramId"\s+value="([^"]+)"', r.text)
-        j_rsaKey = re.search(r'id="j_rsaKey"\s+value="([^"]+)"', r.text)
-        if not paramId or not j_rsaKey:
-            print("❌ 未找到 paramId/j_rsaKey，页面结构变了")
-            return False
-        paramId = paramId.group(1)
-        j_rsaKey = j_rsaKey.group(1)
+            # 2. 访问目标登录页，关闭重定向自动跟随，精准抓参数
+            login_url = (
+                "https://m.cloud.189.cn/udb/udb_login.jsp"
+                "?pageId=1&pageKey=default&clientType=wap"
+                "&redirectURL=https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html"
+            )
+            headers = {
+                "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+                "Referer": "https://m.cloud.189.cn/",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9",
+                "Accept-Encoding": "gzip, deflate, br"
+            }
+            r = session.get(login_url, headers=headers, timeout=15, allow_redirects=True)
+            time.sleep(random.uniform(0.8, 1.5))
 
-        user_enc = rsa_encode(j_rsaKey, username)
-        pwd_enc = rsa_encode(j_rsaKey, password)
+            # 3. 新版正则：从JS全局变量里抓paramId和j_rsaKey（核心修复！）
+            paramId = re.search(r'paramId\s*=\s*"([^"]+)"', r.text)
+            j_rsaKey = re.search(r'j_rsaKey\s*=\s*"([^"]+)"', r.text)
 
-        post_url = "https://open.e.189.cn/api/logbox/oauth2/loginSubmit.do"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; SM-G981B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
-            "Referer": login_url,
-            "Origin": "https://open.e.189.cn",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "X-Requested-With": "XMLHttpRequest"
-        }
-        data = {
-            "appKey": "cloud",
-            "accountType": "01",
-            "userName": f"{{RSA}}{user_enc}",
-            "password": f"{{RSA}}{pwd_enc}",
-            "validateCode": "",
-            "captchaToken": "",
-            "returnUrl": "https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html",
-            "mailSuffix": "@189.cn",
-            "paramId": paramId
-        }
+            if not paramId or not j_rsaKey:
+                print(f"⚠️ 第{retry+1}次重试：未找到参数，页面内容长度：{len(r.text)}")
+                if retry == max_retry - 1:
+                    print("❌ 最终失败：未找到paramId/j_rsaKey")
+                    return False
+                time.sleep(3)
+                continue
 
-        r = session.post(post_url, data=data, headers=headers, timeout=15)
-        res = r.json()
+            paramId = paramId.group(1)
+            j_rsaKey = j_rsaKey.group(1)
+            print(f"✅ 成功抓取参数：paramId={paramId[:10]}...")
 
-        if res.get("result") != 0:
-            print(f"❌ 登录失败：{res.get('msg')}")
-            return False
+            # 4. 加密账号密码
+            user_enc = rsa_encode(j_rsaKey, username)
+            pwd_enc = rsa_encode(j_rsaKey, password)
 
-        session.get(res["toUrl"], timeout=15)
-        print(f"✅ {mask_phone(username)} 登录成功")
-        return True
+            # 5. 提交登录请求
+            post_url = "https://open.e.189.cn/api/logbox/oauth2/loginSubmit.do"
+            post_headers = {
+                "User-Agent": headers["User-Agent"],
+                "Referer": login_url,
+                "Origin": "https://open.e.189.cn",
+                "Accept": "application/json, text/javascript, */*; q=0.01",
+                "X-Requested-With": "XMLHttpRequest",
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
+            }
+            data = {
+                "appKey": "cloud",
+                "accountType": "01",
+                "userName": f"{{RSA}}{user_enc}",
+                "password": f"{{RSA}}{pwd_enc}",
+                "validateCode": "",
+                "captchaToken": "",
+                "returnUrl": "https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html",
+                "mailSuffix": "@189.cn",
+                "paramId": paramId
+            }
 
-    except Exception as e:
-        print(f"⚠️ 登录异常：{str(e)}")
-        return False
+            r = session.post(post_url, data=data, headers=post_headers, timeout=15)
+            res = r.json()
+
+            if res.get("result") != 0:
+                print(f"❌ 登录失败：{res.get('msg')}")
+                return False
+
+            # 6. 完成登录态跳转
+            session.get(res["toUrl"], timeout=15)
+            print(f"✅ {mask_phone(username)} 登录成功")
+            return True
+
+        except Exception as e:
+            print(f"⚠️ 第{retry+1}次登录异常：{str(e)}")
+            if retry == max_retry - 1:
+                print("❌ 最终登录异常")
+                return False
+            time.sleep(3)
+            continue
 
 def sign_and_draw(session):
     rand = str(round(time.time() * 1000))
@@ -126,6 +154,7 @@ def sign_and_draw(session):
         "Host": "m.cloud.189.cn"
     }
 
+    # 签到
     try:
         resp = session.get(sign_url, headers=headers, timeout=15).json()
         bonus = resp.get("netdiskBonus", "0")
@@ -133,12 +162,14 @@ def sign_and_draw(session):
     except:
         sign_str = "❌ 签到失败"
 
+    # 抽奖1
     try:
         d1 = session.get(draw1, headers=headers, timeout=15).json()
         cj1 = d1.get("description", "抽奖失效") if "errorCode" not in d1 else "抽奖失效"
     except:
         cj1 = "抽奖异常"
 
+    # 抽奖2
     try:
         d2 = session.get(draw2, headers=headers, timeout=15).json()
         cj2 = d2.get("description", "抽奖失效") if "errorCode" not in d2 else "抽奖异常"
@@ -201,7 +232,7 @@ def main():
             if i == len(users) - 1:
                 push_msg(sign_str, cj1, cj2)
 
-        time.sleep(random.randint(8, 18))
+        time.sleep(random.randint(10, 20))
 
 if __name__ == "__main__":
     main()
