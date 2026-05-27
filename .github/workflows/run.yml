@@ -1,11 +1,12 @@
-name: 签到
+name: 天翼云盘签到
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, main ]  # 兼容GitHub默认main分支
   pull_request:
-    branches: [ master ]
+    branches: [ master, main ]
   schedule:
+    # cron时间：UTC时间，对应北京时间 6:00 和 22:00 执行
     - cron: '0 22,14 * * *'
   watch:
     types: started
@@ -16,47 +17,27 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
-    - uses: actions/checkout@v2
-    - name: 初始化Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.7
-    - name: 签到
-      run: |
-        pip install -r requirements.txt
-        
-        user='${{ secrets.USER }}'
-        pwd='${{ secrets.PWD }}'
-        
-        user_list=()
-        pwd_list=()
+      # 1. 拉取代码：升级到最新版v4，解决旧版兼容性问题
+      - name: 拉取仓库代码
+        uses: actions/checkout@v4
 
-        IFS="#"
+      # 2. 初始化Python：升级插件+更换支持的Python版本，彻底解决3.7找不到的报错
+      - name: 初始化Python环境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'  # 官方长期支持的稳定版本，完美兼容签到脚本
 
-        for u in ${user[*]}
-        do
-        user_list[${#user_list[*]}]=${u}
-        done
+      # 3. 安装依赖：升级pip+安装脚本所需依赖
+      - name: 安装Python依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests rsa
 
-        for p in ${pwd[*]}
-        do
-        pwd_list[${#pwd_list[*]}]=${p}
-        done
-
-        user_num=${#user_list[*]}
-        pwd_num=${#pwd_list[*]}
-
-        if [ $user_num != $pwd_num ];then
-        echo "账号和密码个数不对应"
-        exit 1
-        else
-        echo "共有 $user_num 个账号，即将开始签到"
-        fi
-
-        for ((i=0;i<$user_num;i++))
-        do
-        python3 checkin.py <<EOF
-        ${user_list[$i]}
-        ${pwd_list[$i]}
-        EOF
-        done
+      # 4. 执行签到：修复账号密码传入逻辑，适配我们修改后的Python脚本
+      - name: 执行签到脚本
+        env:
+          TY_USERNAME: ${{ secrets.USER }}
+          TY_PASSWORD: ${{ secrets.PWD }}
+        run: |
+          # 直接用环境变量传入账号密码，适配Python脚本的读取逻辑
+          python3 checkin.py
