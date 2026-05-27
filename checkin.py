@@ -61,7 +61,7 @@ def login(session, username, password):
     try:
         # 新版登录页（V5）
         login_page_url = "https://open.e.189.cn/api/logbox/separate/wap/login.html"
-        r = session.get(login_page, timeout=15)
+        r = session.get(login_page_url, timeout=15)
 
         # 直接提取 j_rsaKey（新版唯一关键参数）
         j_rsaKey = re.search(r'id="j_rsaKey"\s+value="([^"]+)"', r.text)
