@@ -166,6 +166,67 @@ def push_msg(sign_str, cj1, cj2):
     bj_time = now_time + datetime.timedelta(hours=8)
     time_str = bj_time.strftime("%Y-%m-%d %H:%M:%S %p")
 
-    desp = f"""
-------
-### 🚁Now：
+    # 修复三引号字符串问题，改用字符串拼接
+    desp = "------\n"
+    desp += "### 🚁Now：\n"
+    desp += "```\n"
+    desp += f"{time_str}\n"
+    desp += "```\n"
+    desp += "### ✨签到：\n"
+    desp += "```\n"
+    desp += f"{sign_str}\n"
+    desp += "```\n\n"
+    desp += "### 🚀抽奖:\n"
+    desp += "```\n"
+    desp += f"{cj1}\n"
+    desp += f"{cj2}\n"
+    desp += "```\n"
+
+    try:
+        requests.post(
+            'https://sc.ftqq.com/SCU74663T20ed2886a458ab9e3be21f3de4e8fd965e0b13de3ff1b.send',
+            data={
+                'text': time_str + " 天翼云盘打卡",
+                'desp': desp
+            },
+            timeout=10
+        )
+        print("✅ 推送消息成功")
+    except Exception as e:
+        print(f"⚠️ 推送失败：{str(e)}")
+
+def main():
+    # 使用 # 分隔多账号
+    ty_username = os.getenv("TY_USERNAME", "")
+    ty_password = os.getenv("TY_PASSWORD", "")
+
+    if not ty_username or not ty_password:
+        print("❌ 未读取到环境变量 TY_USERNAME / TY_PASSWORD")
+        return
+
+    # 分隔符改为 #
+    user_list = ty_username.split("#")
+    pwd_list = ty_password.split("#")
+
+    if len(user_list) != len(pwd_list):
+        print("❌ 账号和密码数量不匹配")
+        return
+
+    print(f"📦 共读取到 {len(user_list)} 个账号")
+
+    for idx in range(len(user_list)):
+        u = user_list[idx].strip()
+        p = pwd_list[idx].strip()
+        if not u or not p:
+            continue
+
+        s = requests.Session()
+        login_ok = login(s, u, p)
+        if login_ok:
+            sign_str, cj1, cj2 = sign_and_draw(s)
+            if idx == len(user_list) - 1:
+                push_msg(sign_str, cj1, cj2)
+        time.sleep(random.randint(6, 18))
+
+if __name__ == "__main__":
+    main()
